@@ -1,0 +1,10 @@
+# build outputs (the bootable image in docs/ IS committed on purpose)
+build/
+*.o
+*.elf
+
+# node
+node_modules/
+
+# OS cruft
+.DS_Store

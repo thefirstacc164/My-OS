@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyOS — boot it in your browser</title>
+<meta name="description" content="A small operating system written from scratch. Boots in your browser, no installation needed.">
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #111823;
+    --panel-2: #0e141d;
+    --line: #1e2a38;
+    --text: #d7e2ee;
+    --muted: #7d8ea3;
+    --accent: #3ddc97;
+    --accent-2: #59b0ff;
+    --amber: #ffcc66;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background:
+      radial-gradient(1200px 600px at 50% -10%, #16233a 0%, transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100%;
+  }
+
+  .wrap {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 40px 20px 60px;
+  }
+
+  header { text-align: center; margin-bottom: 26px; }
+
+  h1 {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: clamp(30px, 6vw, 46px);
+    letter-spacing: 0.06em;
+    margin: 0 0 10px;
+    color: #eaf2fb;
+  }
+
+  h1 .dot { color: var(--accent); }
+
+  .tagline {
+    color: var(--muted);
+    font-size: 15px;
+    margin: 0;
+  }
+
+  .machine {
+    background: linear-gradient(180deg, #16202d, #0d131c);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 14px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04);
+  }
+
+  .machine-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 2px 6px 12px;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .status { display: flex; align-items: center; gap: 8px; }
+
+  .led {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #33404f;
+    box-shadow: 0 0 0 rgba(61,220,151,0);
+    transition: all .3s;
+  }
+  .led.on  { background: var(--accent); box-shadow: 0 0 10px rgba(61,220,151,.8); }
+  .led.err { background: #ff5a5a; box-shadow: 0 0 10px rgba(255,90,90,.8); }
+
+  .screen-outer {
+    position: relative;
+    background: #05080c;
+    border: 1px solid #000;
+    border-radius: 10px;
+    overflow: hidden;
+    min-height: 360px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #screen_container {
+    font: 14px/14px "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    background: #000;
+    width: 720px;
+    height: 350px;
+    transform-origin: center center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  #screen_container > div {
+    white-space: pre;
+    font: 14px/14px "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    color: #c8d4e2;
+    padding: 0;
+    margin: 0;
+    position: relative;
+    z-index: 2;
+  }
+
+  #screen_container > canvas { display: none; }
+
+  .power {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background: radial-gradient(circle at 50% 45%, #101a26 0%, #05080c 70%);
+    z-index: 5;
+    text-align: center;
+    padding: 24px;
+  }
+
+  .power.hidden { display: none; }
+
+  .power p { color: var(--muted); margin: 0; font-size: 14px; max-width: 420px; line-height: 1.5; }
+
+  button {
+    font: inherit;
+    cursor: pointer;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: #16202b;
+    color: var(--text);
+    padding: 10px 16px;
+    transition: background .15s, border-color .15s, transform .1s;
+  }
+  button:hover { background: #1c2937; border-color: #2b3d52; }
+  button:active { transform: translateY(1px); }
+
+  .btn-power {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 16px;
+    letter-spacing: .08em;
+    padding: 14px 30px;
+    border: 1px solid rgba(61,220,151,.45);
+    background: rgba(61,220,151,.08);
+    color: var(--accent);
+    box-shadow: 0 0 24px rgba(61,220,151,.15);
+  }
+  .btn-power:hover { background: rgba(61,220,151,.16); border-color: var(--accent); }
+  .btn-power:disabled { opacity: .5; cursor: default; }
+
+  .controls { display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+
+  .hint {
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 14px;
+    line-height: 1.6;
+  }
+
+  kbd {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px;
+    background: #16202b;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    padding: 1px 6px;
+    color: var(--text);
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin-top: 34px;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+
+  .card h3 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--accent-2);
+    font-family: ui-monospace, Consolas, monospace;
+  }
+
+  .card p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+  .card code { color: var(--amber); font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+
+  footer {
+    margin-top: 40px;
+    text-align: center;
+    color: #5a6b7f;
+    font-size: 12px;
+    line-height: 1.8;
+  }
+  footer a { color: #7d94ad; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>MyOS<span class="dot">.</span></h1>
+    <p class="tagline">A real operating system, written from scratch — running entirely in this browser tab.</p>
+  </header>
+
+  <div class="machine">
+    <div class="machine-bar">
+      <div class="status">
+        <span class="led" id="led"></span>
+        <span id="status-text">powered off</span>
+      </div>
+      <div>x86 · 32-bit · i386 emulator</div>
+    </div>
+
+    <div class="screen-outer">
+      <div id="screen_container">
+        <div></div>
+        <canvas style="display: none"></canvas>
+      </div>
+
+      <div class="power" id="power">
+        <button class="btn-power" id="boot-btn">▶ POWER ON</button>
+        <p>This boots MyOS inside a virtual PC emulated in your browser.
+           Nothing is installed and nothing is downloaded to your computer.</p>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button id="restart-btn" disabled>⟲ Restart</button>
+      <button id="fullscreen-btn" disabled>⛶ Fullscreen</button>
+    </div>
+
+    <p class="hint">
+      Click the screen, then type <code>help</code> and press <kbd>Enter</kbd>.
+    </p>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <h3>What you're looking at</h3>
+      <p>A hand-written 32-bit kernel: its own boot sector, its own interrupt
+         handlers, its own keyboard driver, its own shell. No Linux underneath.</p>
+    </div>
+    <div class="card">
+      <h3>Try these</h3>
+      <p><code>help</code> · <code>about</code> · <code>mem</code> ·
+         <code>cpu</code> · <code>date</code> · <code>uptime</code> ·
+         <code>theme 14</code> · <code>beep</code> · <code>reboot</code></p>
+    </div>
+    <div class="card">
+      <h3>How it boots</h3>
+      <p>The browser emulates a PC (v86). The emulated BIOS reads the first
+         sector of <code>myos.img</code>, jumps to it, and that 512-byte program
+         loads the kernel and switches the CPU into protected mode.</p>
+    </div>
+  </div>
+
+  <footer>
+    Runs on <a href="https://github.com/copy/v86">v86</a> (BSD-2-Clause) ·
+    SeaBIOS + VGABIOS are LGPL<br>
+    Everything here is served from a static GitHub Pages site — no server, no install.
+  </footer>
+</div>
+
+<script src="v86/libv86.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var bootBtn = document.getElementById("boot-btn");
+  var power = document.getElementById("power");
+  var led = document.getElementById("led");
+  var statusText = document.getElementById("status-text");
+  var restartBtn = document.getElementById("restart-btn");
+  var fullscreenBtn = document.getElementById("fullscreen-btn");
+  var container = document.getElementById("screen_container");
+  var emulator = null;
+
+  function setStatus(text, state) {
+    statusText.textContent = text;
+    led.className = "led" + (state ? " " + state : "");
+  }
+
+  function fail(message) {
+    setStatus("error", "err");
+    power.classList.remove("hidden");
+    power.innerHTML =
+      '<p style="color:#ff8080;max-width:520px">' + message + '</p>';
+    bootBtn.disabled = true;
+  }
+
+  function fitScreen() {
+    var outer = container.parentElement;
+    var available = outer.clientWidth - 24;
+    var scale = Math.min(1, available / 720);
+    container.style.transform = "scale(" + scale + ")";
+    outer.style.height = Math.round(350 * scale + 24) + "px";
+    outer.style.minHeight = "0";
+  }
+
+  function boot() {
+    if (emulator) return;
+    bootBtn.disabled = true;
+    setStatus("loading emulator…");
+
+    if (typeof V86 === "undefined") {
+      fail("The emulator script did not load. Check your internet connection and reload the page.");
+      return;
+    }
+
+    try {
+      emulator = new V86({
+        wasm_path: "v86/v86.wasm",
+        memory_size: 32 * 1024 * 1024,
+        vga_memory_size: 2 * 1024 * 1024,
+        screen_container: container,
+        bios: { url: "bios/seabios.bin" },
+        vga_bios: { url: "bios/vgabios.bin" },
+        fda: { url: "myos.img" },
+        autostart: true,
+        disable_mouse: true,
+      });
+    } catch (e) {
+      fail("Could not start the emulator: " + e.message);
+      return;
+    }
+
+    emulator.add_listener("emulator-ready", function () {
+      setStatus("running — MyOS booting", "on");
+      power.classList.add("hidden");
+      restartBtn.disabled = false;
+      fullscreenBtn.disabled = false;
+      container.click();
+    });
+
+    emulator.add_listener("download-error", function () {
+      fail("One of the files failed to download (myos.img, bios or wasm). " +
+           "Reload the page to try again.");
+    });
+
+    container.addEventListener("click", function () { container.focus(); });
+  }
+
+  bootBtn.addEventListener("click", boot);
+
+  restartBtn.addEventListener("click", function () {
+    if (emulator) {
+      emulator.restart();
+      setStatus("rebooting…", "on");
+    }
+  });
+
+  fullscreenBtn.addEventListener("click", function () {
+    var el = document.querySelector(".machine");
+    if (!document.fullscreenElement) {
+      if (el.requestFullscreen) el.requestFullscreen();
+    } else if (document.exitFullscreen) {
+      document.exitFullscreen();
+    }
+  });
+
+  window.addEventListener("resize", fitScreen);
+  fitScreen();
+})();
+</script>
+</body>
+</html>
