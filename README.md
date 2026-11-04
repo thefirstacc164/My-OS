@@ -4,8 +4,13 @@
 
 No installation. No downloads. No admin rights. Just a link.
 
-> ### ▶ Boot it: **https://thefirstacc164.github.io/My-OS/**
+> ### ▶ Boot it now (works immediately, nothing to set up)
+> **https://cdn.jsdelivr.net/gh/thefirstacc164/My-OS@main/docs/index.html**
+>
 > Click **POWER ON**, then click the black screen and type `help` + `Enter`.
+>
+> The permanent address **https://thefirstacc164.github.io/My-OS/** works too —
+> after a one-time switch is flipped in the repository settings (see below).
 
 ---
 
@@ -129,10 +134,19 @@ node tools/selftest.js
 
 ## Hosting — why it is free
 
-The site is plain static files in `docs/`, published with **GitHub Pages**
-(free for public repositories). The emulator (`v86`, BSD-2-Clause) and the
-BIOS ROMs (SeaBIOS/VGABIOS, LGPL) are vendored into `docs/` so the page needs
-no third-party servers, no API keys and no login.
+The site is plain static files in `docs/`. The emulator (`v86`, BSD-2-Clause)
+and the BIOS ROMs (SeaBIOS/VGABIOS, LGPL) are vendored into `docs/` so the page
+needs no third-party servers, no API key, no account and no login.
+
+Two free ways to reach it:
+
+1. **jsDelivr (already live, no setup)** — it serves any public GitHub folder:
+   `https://cdn.jsdelivr.net/gh/thefirstacc164/My-OS@main/docs/index.html`
+2. **GitHub Pages (permanent, prettier URL)** — switch it on once:
+   - open <https://github.com/thefirstacc164/My-OS/settings/pages>
+   - under *Build and deployment* → *Source* choose **Deploy from a branch**
+   - Branch: **main**, folder: **/docs**, then **Save**
+   - after a minute the site is at <https://thefirstacc164.github.io/My-OS/>
 
 Total payload: about 5 MB, cached by the browser after the first visit.
 
