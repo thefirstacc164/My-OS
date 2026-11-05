@@ -3,8 +3,8 @@
  * Headless self-test for MyOS.
  *
  * Boots docs/myos.img inside v86 (the same emulator the website uses),
- * clicks around the desktop with real PS/2 mouse packets, types on the
- * emulated keyboard and checks what the kernel reports on the serial port.
+ * drives the desktop with real PS/2 mouse packets and keyboard scancodes,
+ * and checks what the kernel reports on the serial port.
  *
  *   npm install v86
  *   node tools/selftest.js
@@ -18,6 +18,14 @@ const { V86 } = require("v86");
 const V86_DIR = path.dirname(require.resolve("v86/package.json"));
 const ROOT = path.resolve(__dirname, "..");
 const DOCS = path.join(ROOT, "docs");
+
+/* start menu item centres (see kernel/wm.c) */
+const MENU_START = [40, 15];
+const ITEM = {
+    files: 52, terminal: 80, editor: 108, browser: 136,
+    clock: 164, calc: 192, snake: 220, about: 248,
+    restart: 285, shutdown: 313,
+};
 
 const read = (p) => {
     const b = fs.readFileSync(p);
@@ -71,6 +79,11 @@ async function main() {
         await sleep(200);
     }
 
+    async function click_at(x, y) {
+        await move_to(x, y);
+        await click();
+    }
+
     async function wait_for(needle, timeout = 6000) {
         const deadline = Date.now() + timeout;
         while (Date.now() < deadline) {
@@ -81,16 +94,36 @@ async function main() {
         return false;
     }
 
-    check("kernel boots", await wait_for("starting desktop", 20000));
+    /* every new window is cascaded by 28 px from the one before it */
+    let opened = 0;
+    function cascade() {
+        const offset = (opened % 5) * 28;
+        return { x: 40 + offset, y: 50 + offset };
+    }
+
+    async function open_from_menu(item) {
+        await click_at(MENU_START[0], MENU_START[1]);
+        await sleep(250);
+        await click_at(100, ITEM[item]);
+        await sleep(450);
+        opened++;
+    }
+
+    check("kernel boots", await wait_for("starting desktop", 25000));
     check("VESA framebuffer initialised", serial.includes("VESA framebuffer"));
     check("mouse driver started", serial.includes("PS/2 mouse driver"));
     check("file system mounted", serial.includes("in-memory file system"));
 
+    /* --- start menu --------------------------------------------------- */
     serial = "";
-    await move_to(190, 15);          /* "Terminal" in the top bar */
-    await click();
-    check("clicking the top bar opens the Terminal", await wait_for("OPEN Terminal"));
+    await click_at(MENU_START[0], MENU_START[1]);
+    check("the start menu opens", await wait_for("MENU"));
 
+    serial = "";
+    await click_at(100, ITEM.terminal);
+    check("the menu opens the Terminal", await wait_for("OPEN Terminal"));
+
+    /* --- typing in the terminal --------------------------------------- */
     serial = "";
     emulator.keyboard_send_text("about\n");
     check("typing runs a shell command", await wait_for("written from scratch"));
@@ -103,15 +136,48 @@ async function main() {
     emulator.keyboard_send_text("mem\n");
     check("mem reads the BIOS memory map", await wait_for("usable memory"));
 
+    /* --- browser ------------------------------------------------------ */
     serial = "";
-    await move_to(346, 15);          /* "Browser" */
-    await click();
-    check("the Browser opens", await wait_for("OPEN Browser"));
+    await open_from_menu("browser");
+    check("the Browser opens from the menu", await wait_for("OPEN Browser"));
 
     serial = "";
-    await move_to(297, 243);         /* the "About MyOS" link */
-    await click();
+    await click_at(297, 243);          /* the "About MyOS" link */
     check("clicking a link navigates", await wait_for("LINK about.html"));
+
+    /* --- window controls ---------------------------------------------- */
+    serial = "";
+    await open_from_menu("files");
+    check("the Files window opens", await wait_for("OPEN Files"));
+
+    const files = cascade();                       /* Files is the third window */
+    serial = "";
+    await click_at(files.x + 356 - 36, files.y + 13);   /* maximize button */
+    check("the maximize button maximises", await wait_for("MAXIMIZE Files"));
+
+    serial = "";
+    await click_at(640 - 44 + 8, 30 + 13);        /* same button, now top right */
+    check("clicking again restores the window", await wait_for("RESTORE Files"));
+
+    /* --- clock and calculator ----------------------------------------- */
+    serial = "";
+    await open_from_menu("clock");
+    check("the Clock opens", await wait_for("OPEN Clock"));
+
+    serial = "";
+    await open_from_menu("calc");
+    check("the Calculator opens", await wait_for("OPEN Calculator"));
+
+    serial = "";
+    await open_from_menu("snake");
+    check("Snake opens", await wait_for("OPEN Snake"));
+
+    /* --- shutting down (last: it halts the machine) -------------------- */
+    serial = "";
+    await click_at(MENU_START[0], MENU_START[1]);
+    await sleep(250);
+    await click_at(100, ITEM.shutdown);
+    check("the Shut down menu item halts MyOS", await wait_for("ACTION shutdown"));
 
     if (failures.length) {
         console.log(`\n${failures.length} check(s) failed`);

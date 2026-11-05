@@ -7,6 +7,63 @@
 #include "kernel.h"
 #include "gfx.h"
 
+/* draw text with the 8x16 font magnified by an integer scale */
+static void big_text(int x, int y, const char *s, int scale, u8 color)
+{
+    while (*s) {
+        const unsigned char *g = font8x16 + (unsigned char)(*s) * 16;
+        for (int row = 0; row < 16; row++) {
+            u8 bits = g[row];
+            if (!bits)
+                continue;
+            for (int col = 0; col < 8; col++) {
+                if (bits & (0x80 >> col))
+                    gfx_fill(x + col * scale, y + row * scale, scale, scale, color);
+            }
+        }
+        x += 8 * scale;
+        s++;
+    }
+}
+
+static int big_width(const char *s, int scale)
+{
+    int n = 0;
+    while (s[n])
+        n++;
+    return n * 8 * scale;
+}
+
+/* the boot splash: logo, tagline and a progress bar */
+static void splash(void)
+{
+    int w = gfx_width(), h = gfx_height();
+
+    gfx_vgradient(0, 0, w, h, C_GRADIENT_LAST, C_GRADIENT_FIRST);
+    gfx_fill(0, 0, w, h, C_DESK_DEEP);
+    gfx_vgradient(0, 0, w, h, C_GRADIENT_FIRST, C_GRADIENT_LAST);
+
+    big_text((w - big_width("MyOS", 4)) / 2, h / 2 - 90, "MyOS", 4, C_ACCENT);
+    gfx_hline(w / 2 - 90, h / 2 - 14, 180, C_BORDER);
+
+    const char *tag = "0.3  -  full desktop";
+    gfx_text((w - gfx_text_width(tag)) / 2, h / 2 + 2, tag, C_TEXT_DIM);
+
+    int bar_w = 300, bar_x = (w - bar_w) / 2, bar_y = h / 2 + 60;
+    gfx_frame(bar_x - 1, bar_y - 1, bar_w + 2, 8, C_BORDER);
+
+    const char *status = "starting desktop";
+    gfx_text((w - gfx_text_width(status)) / 2, bar_y + 20, status, C_TEXT_MUTED);
+
+    for (int step = 0; step <= 30; step++) {
+        gfx_fill(bar_x, bar_y, bar_w * step / 30, 6, C_ACCENT);
+        gfx_present();
+        timer_sleep_ms(18);
+    }
+
+    timer_sleep_ms(220);
+}
+
 static void ok_line(const char *text)
 {
     console_set_color(C_ACCENT);
@@ -30,7 +87,7 @@ void kmain(void)
     console_set_default_color(C_TEXT);
 
     console_set_color(C_ACCENT);
-    kprintf("\n  MyOS 0.2 \"Desktop\"\n");
+    kprintf("\n  MyOS 0.3 \"Full desktop\"\n");
     console_set_color(C_TEXT_MUTED);
     kprintf("  a hand-written operating system\n\n");
 
@@ -62,7 +119,9 @@ void kmain(void)
 
     console_set_color(C_TEXT_MUTED);
     kprintf("\n  starting desktop...\n");
-    timer_sleep_ms(500);
+    timer_sleep_ms(150);
+
+    splash();
 
     wm_run();
 }

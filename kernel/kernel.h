@@ -188,12 +188,15 @@ struct app {
     void (*key)(struct window *w, int key);
     void (*click)(struct window *w, int x, int y);
     void (*scroll)(struct window *w, int amount);
+    int  (*tick)(struct window *w);   /* returns 1 when the window needs a redraw */
 };
 
 struct window {
     const struct app *app;
     int open;
     int x, y, w, h;
+    int maximized;
+    int restore_x, restore_y, restore_w, restore_h;
     void *state;
 };
 
@@ -201,6 +204,7 @@ int  ui_hit(int x, int y, int rx, int ry, int rw, int rh);
 void ui_button(int x, int y, int w, int h, const char *label, u8 bg, u8 fg);
 void ui_text(int x, int y, int max_px, const char *s, u8 color);
 
+int  wm_is_focused(struct window *w);
 void wm_run(void);
 struct window *wm_open(const struct app *app);
 void wm_redraw(void);
