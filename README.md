@@ -1,163 +1,178 @@
 # MyOS
 
-**A real, bootable operating system — written from scratch, and runnable in a browser tab.**
+**A desktop operating system written from scratch — and runnable in a browser tab.**
 
-No installation. No downloads. No admin rights. Just a link.
+Windows you can drag, a mouse, a file manager, a text editor, a terminal, a browser.
+No installation, no account, no downloads.
 
-> ### ▶ Boot it now (works immediately, nothing to set up)
-> **https://cdn.jsdelivr.net/gh/thefirstacc164/My-OS@main/docs/index.html**
->
-> Click **POWER ON**, then click the black screen and type `help` + `Enter`.
->
-> The permanent address **https://thefirstacc164.github.io/My-OS/** works too —
-> after a one-time switch is flipped in the repository settings (see below).
+> ### ▶ Boot it: **https://cdn.jsdelivr.net/gh/thefirstacc164/My-OS@main/docs/index.html**
+> Click **POWER ON**, then use the top bar to open apps.
+> (The permanent address `https://thefirstacc164.github.io/My-OS/` works after a one-time
+> switch in the repository settings — see [Hosting](#hosting--why-it-is-free).)
+
+![The MyOS desktop](docs/screenshot-desktop.png)
 
 ---
 
 ## What this is
 
-Most "my own OS" projects are a menu screen or a Linux you configured. This is
-different: it is a genuinely hand-written operating system for 32-bit x86.
+Not a menu screen, and not a Linux you configured. This is a hand-written
+operating system for 32-bit x86, from the first byte the CPU executes.
 
 | | |
 |---|---|
-| **Boot sector** | 512 bytes, written in x86 assembly. Loads the kernel off a floppy image. |
-| **Kernel** | ~13 KB of C + assembly. No Linux, no Unix, no existing OS underneath. |
-| **CPU mode** | 32-bit protected mode, flat 4 GB segments, own GDT and IDT. |
-| **Drivers** | VGA text mode, PS/2 keyboard, PIT timer, CMOS real-time clock, serial port. |
-| **Shell** | Interactive command line with 14 commands and a playable game. |
+| **Boot sector** | 512 bytes of assembly: memory map, kernel loader, A20, GDT, protected mode, VESA mode |
+| **Kernel** | ~40 KB of C: interrupts, timer, keyboard, mouse, graphics, window manager, shell, apps |
+| **Display** | 640×480, 8-bit colour, VESA linear framebuffer, drawn pixel by pixel |
+| **Input** | PS/2 keyboard and mouse, both interrupt driven |
+| **Storage** | a small in-memory file system (its own tree, files and sizes) |
+| **Desktop** | wallpaper, top bar with a live clock, draggable windows, focus, close buttons |
+| **Apps** | Files, Terminal, Editor, Browser, About |
 
-It runs on **v86**, an x86 PC emulator written in Rust/WebAssembly that runs
-entirely inside the browser. The emulated BIOS reads the first sector of our
-disk image, jumps into our boot sector, and our code takes over from there.
+It runs on **v86**, an x86 PC emulator written in Rust and compiled to WebAssembly.
+The emulated BIOS reads the first sector of our disk image, jumps into our boot
+sector, and from there every instruction is ours.
 
 ---
 
 ## Using it
 
-1. Open the link above in any modern browser (Chrome, Edge, Firefox, Safari).
-2. Click **POWER ON**.
-3. Click the black screen once so it has keyboard focus.
-4. Type `help` and press <kbd>Enter</kbd>.
+1. Open the link at the top in any modern browser.
+2. Click **POWER ON** (the first load pulls ~5 MB of emulator files).
+3. Click around: the top bar opens apps, title bars drag windows, `×` closes them.
 
-### Commands
-
-| Command | What it does |
+| App | What it does |
 |---|---|
-| `help` | List every command |
-| `about` | What MyOS is |
-| `clear` | Wipe the screen |
-| `echo <text>` | Print text back |
-| `uptime` | Seconds since boot + timer ticks |
-| `date` | Read the hardware clock (CMOS chip) |
-| `mem` | The physical memory map reported by the BIOS (E820) |
-| `cpu` | CPU vendor string via the `CPUID` instruction |
-| `theme <0-15>` | Change the text colour |
-| `beep` | Beep the PC speaker |
-| `snake` | Play Snake — arrow keys to move, `q` to quit |
-| `logo` | Redraw the logo |
-| `reboot` | Restart the machine |
-| `halt` | Stop the CPU |
+| **Files** | Browse the file system, open folders, click a file to open it |
+| **Terminal** | `help`, `ls`, `cat`, `write`, `rm`, `open`, `mem`, `cpu`, `date`, `uptime`, `echo`, `clear`, `logo`, `reboot`, `halt` |
+| **Editor** | Type into a file, `Save` writes it back to the file system, arrow keys move |
+| **Browser** | Renders `.html` files from the file system: headings, paragraphs, bullets, clickable links |
+| **About** | Live system information: display mode, RAM, uptime, CPU vendor |
+
+Everything is in RAM: reboot and the machine is factory-fresh again.
 
 ---
 
-## How the boot works
+## How it boots
 
 ```
-        power on
-            │
-            ▼
-   BIOS (SeaBIOS, in the emulator)
-   reads sector 0 of myos.img  ──────────►  512-byte boot sector
-                                                  │  1. ask BIOS for memory map (INT 15h / E820)
-                                                  │  2. read kernel from floppy (INT 13h / CHS)
-                                                  │  3. open the A20 line
-                                                  │  4. build a GDT, set CR0.PE
-                                                  ▼
-                                          32-bit protected mode
-                                                  │
-                                                  ▼
-                                          kernel at 0x10000
-                                           ├── VGA console
-                                           ├── IDT + PIC remap
-                                           ├── PIT timer 100 Hz
-                                           ├── PS/2 keyboard
-                                           └── shell
+   power on
+      │
+      ▼
+  BIOS (SeaBIOS inside the emulator)
+  reads sector 0 of myos.img ──────────►  512-byte boot sector
+                                                │ 1. BIOS memory map        (INT 15h / E820)
+                                                │ 2. read kernel from disk (INT 13h / CHS)
+                                                │ 3. open the A20 line
+                                                │ 4. VESA mode 640x480x8   (INT 10h / 4F02)
+                                                │ 5. GDT, CR0.PE
+                                                ▼
+                                        32-bit protected mode @ 0x10000
+                                                │
+                                                ├── gfx       framebuffer + 8x16 font
+                                                ├── console   text output, boot log
+                                                ├── idt/pic   interrupts, exception reporting
+                                                ├── pit       100 Hz clock
+                                                ├── keyboard  PS/2, IRQ1
+                                                ├── mouse     PS/2, IRQ12
+                                                ├── fs        in-memory files
+                                                └── wm        desktop, windows, apps
 ```
 
-The two pieces talk through a fixed layout: the boot sector leaves the BIOS
-memory map at `0x5000` and loads the kernel binary at `0x10000`.
+The boot sector leaves data behind at fixed addresses for the kernel:
+the BIOS memory map at `0x5000`, and the VESA mode information block at `0x4800`
+(framebuffer address, pitch, resolution).
 
 ---
 
 ## Source map
 
 ```
-boot/boot.S         the 512-byte boot sector (assembly)
-kernel/entry.S      kernel entry point + interrupt stubs
-kernel/main.c       boot sequence, memory accounting
-kernel/console.c    VGA text console, formatting, serial mirror
-kernel/idt.c        IDT, PIC remapping, CPU exception reporting
-kernel/pit.c        system timer
-kernel/keyboard.c   PS/2 keyboard driver (US layout, shift + caps)
-kernel/rtc.c        CMOS clock
-kernel/shell.c      the shell and all commands
-kernel/game.c       Snake
-kernel/string.c     memcpy/memset/strcmp...
-kernel/kernel.h     shared types and prototypes
-kernel/linker.ld    places the kernel at 0x10000
-tools/mkimage.py    builds the bootable 1.44 MB floppy image
-docs/               the website (GitHub Pages serves this folder)
+boot/boot.S          the 512-byte boot sector (assembly)
+kernel/entry.S       entry point, interrupt stubs
+kernel/main.c        boot log, driver start-up
+kernel/gfx.c         framebuffer, palette, drawing, 8x16 font renderer
+kernel/console.c     text console (screen or window buffer) + printf
+kernel/wm.c          desktop: wallpaper, top bar, windows, mouse/keyboard events
+kernel/apps.c        Files, Terminal, Editor, Browser, About
+kernel/fs.c          in-memory file system
+kernel/idt.c         IDT, PIC remapping, CPU exception reporting
+kernel/pit.c         system timer
+kernel/keyboard.c    PS/2 keyboard driver (US layout, shift, caps)
+kernel/mouse.c       PS/2 mouse driver (3-byte packets, IRQ12)
+kernel/rtc.c         CMOS clock
+kernel/memory.c      E820 memory accounting
+kernel/string.c      memcpy / memset / strcmp / ...
+tools/mkfont.py      pulls the 8x16 font out of the VGA BIOS at build time
+tools/mkimage.py     builds the bootable 1.44 MB floppy image
+tools/selftest.js    boots the image headlessly and clicks around
+docs/                the website (GitHub Pages / jsDelivr)
 ```
 
-## Building it yourself
+## Building it
 
-You need `gcc`, `as`, `ld`, `objcopy` and `python3` — all standard on Linux:
+You need `gcc`, `as`, `ld`, `objcopy` and `python3`:
 
 ```sh
 make          # produces docs/myos.img
 make clean
 ```
 
-The Makefile compiles the kernel, works out how many 512-byte sectors it needs,
-bakes that number into the boot sector, and assembles the floppy image.
+The Makefile compiles the kernel, counts how many 512-byte sectors it needs,
+bakes that number into the boot sector, generates the font, and assembles the
+floppy image.
 
-There is also a headless self-test that boots the image inside the same
-emulator and checks the shell output:
+## Testing it
+
+`tools/selftest.js` boots the exact published image in v86, then drives the
+desktop with real PS/2 packets — it moves the emulated mouse, clicks the top
+bar, types in the terminal and clicks a link in the browser:
 
 ```sh
 npm install v86
 node tools/selftest.js
 ```
 
+```
+  ok   kernel boots
+  ok   VESA framebuffer initialised
+  ok   mouse driver started
+  ok   file system mounted
+  ok   clicking the top bar opens the Terminal
+  ok   typing runs a shell command
+  ok   ls lists the file system
+  ok   mem reads the BIOS memory map
+  ok   the Browser opens
+  ok   clicking a link navigates
+
+all checks passed
+```
+
 ---
 
 ## Hosting — why it is free
 
-The site is plain static files in `docs/`. The emulator (`v86`, BSD-2-Clause)
-and the BIOS ROMs (SeaBIOS/VGABIOS, LGPL) are vendored into `docs/` so the page
-needs no third-party servers, no API key, no account and no login.
+`docs/` is a plain static folder. The emulator (`v86`, BSD-2-Clause) and the
+BIOS ROMs (SeaBIOS/VGABIOS, LGPL) are vendored inside it, so the page needs no
+server, no API key and no account.
 
-Two free ways to reach it:
-
-1. **jsDelivr (already live, no setup)** — it serves any public GitHub folder:
+1. **jsDelivr** (already live, zero setup) — serves any public GitHub folder:
    `https://cdn.jsdelivr.net/gh/thefirstacc164/My-OS@main/docs/index.html`
-2. **GitHub Pages (permanent, prettier URL)** — switch it on once:
-   - open <https://github.com/thefirstacc164/My-OS/settings/pages>
-   - under *Build and deployment* → *Source* choose **Deploy from a branch**
-   - Branch: **main**, folder: **/docs**, then **Save**
-   - after a minute the site is at <https://thefirstacc164.github.io/My-OS/>
-
-Total payload: about 5 MB, cached by the browser after the first visit.
+2. **GitHub Pages** (permanent, nicer URL) — enable once:
+   <https://github.com/thefirstacc164/My-OS/settings/pages> →
+   *Deploy from a branch* → **main** + **/docs** → Save.
 
 ---
 
 ## Honest limits
 
-This is a real OS, but a small one. It has no multitasking, no file system, no
-user accounts, no networking and no 64-bit mode. It boots, drives real hardware,
-and gives you a shell. Everything beyond that is a next step, not a missing
-promise.
+This is a real desktop, but a small one. There is no multitasking (apps share one
+loop), no networking, no 64-bit mode, no user accounts, and the file system lives
+in RAM. Windows cannot be resized yet.
+
+Natural next steps: resizable windows, a taskbar clock menu, real scrollback in the
+terminal, saving the file system to disk, a snake game as a window, and a simple
+network stack for the browser.
 
 ---
 

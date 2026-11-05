@@ -210,6 +210,32 @@
   .card p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
   .card code { color: var(--amber); font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
 
+  .shots {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-top: 34px;
+  }
+
+  .shots figure { margin: 0; }
+
+  .shots img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: #000;
+    image-rendering: pixelated;
+  }
+
+  .shots figcaption {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 8px;
+    text-align: center;
+  }
+
   footer {
     margin-top: 40px;
     text-align: center;
@@ -225,7 +251,7 @@
 
   <header>
     <h1>MyOS<span class="dot">.</span></h1>
-    <p class="tagline">A real operating system, written from scratch — running entirely in this browser tab.</p>
+    <p class="tagline">A real desktop operating system, written from scratch — running entirely in this browser tab.</p>
   </header>
 
   <div class="machine">
@@ -245,8 +271,9 @@
 
       <div class="power" id="power">
         <button class="btn-power" id="boot-btn">▶ POWER ON</button>
-        <p>This boots MyOS inside a virtual PC emulated in your browser.
-           Nothing is installed and nothing is downloaded to your computer.</p>
+        <p>This boots MyOS — a desktop with windows, a mouse, a file manager,
+           a text editor, a terminal and a browser — inside a virtual PC emulated
+           in your browser. Nothing is installed on your computer.</p>
       </div>
     </div>
 
@@ -256,27 +283,43 @@
     </div>
 
     <p class="hint">
-      Click the screen, then type <code>help</code> and press <kbd>Enter</kbd>.
+      Click <code>Terminal</code> in the top bar, then type <code>help</code> and press <kbd>Enter</kbd>.
+      Drag windows by their title bar. Click <code>×</code> to close one.
     </p>
+  </div>
+
+  <div class="shots">
+    <figure>
+      <img src="screenshot-desktop.png" alt="MyOS desktop with the browser window open">
+      <figcaption>The browser rendering a page stored inside the kernel's file system.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshot-apps.png" alt="MyOS with the terminal, file manager and browser open">
+      <figcaption>Terminal, file manager and browser open at the same time.</figcaption>
+    </figure>
   </div>
 
   <div class="cards">
     <div class="card">
       <h3>What you're looking at</h3>
-      <p>A hand-written 32-bit kernel: its own boot sector, its own interrupt
-         handlers, its own keyboard driver, its own shell. No Linux underneath.</p>
+      <p>A hand-written 32-bit kernel: its own boot sector, interrupt handlers,
+         keyboard and mouse drivers, graphics stack, window manager and apps.
+         No Linux underneath.</p>
     </div>
     <div class="card">
-      <h3>Try these</h3>
-      <p><code>help</code> · <code>about</code> · <code>mem</code> ·
-         <code>cpu</code> · <code>date</code> · <code>uptime</code> ·
-         <code>theme 14</code> · <code>beep</code> · <code>reboot</code></p>
+      <h3>The apps</h3>
+      <p><strong>Files</strong> — browse the in-memory file system ·
+         <strong>Terminal</strong> — 16 shell commands ·
+         <strong>Editor</strong> — edit and save text files ·
+         <strong>Browser</strong> — a tiny page renderer with clickable links ·
+         <strong>About</strong> — live system information.</p>
     </div>
     <div class="card">
       <h3>How it boots</h3>
       <p>The browser emulates a PC (v86). The emulated BIOS reads the first
-         sector of <code>myos.img</code>, jumps to it, and that 512-byte program
-         loads the kernel and switches the CPU into protected mode.</p>
+         sector of <code>myos.img</code>, that 512-byte program loads the kernel
+         and switches the CPU into protected mode, and the kernel asks VESA for
+         a 640×480 framebuffer.</p>
     </div>
   </div>
 

@@ -18,14 +18,23 @@ LDFLAGS := -m elf_i386 -T kernel/linker.ld -nostdlib
 
 C_SRC   := $(wildcard kernel/*.c)
 S_SRC   := $(wildcard kernel/*.S)
+GEN_OBJ := build/font8x16.o
 OBJ     := $(patsubst kernel/%.c,build/%.o,$(C_SRC)) \
-           $(patsubst kernel/%.S,build/%.o,$(S_SRC))
+           $(patsubst kernel/%.S,build/%.o,$(S_SRC)) \
+           $(GEN_OBJ)
 
 IMAGE   := docs/myos.img
 
 .PHONY: all clean run
 
 all: $(IMAGE)
+
+build/font8x16.c: tools/mkfont.py docs/bios/vgabios.bin
+	@mkdir -p build
+	$(PYTHON) tools/mkfont.py docs/bios/vgabios.bin $@
+
+build/%.o: build/%.c kernel/kernel.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
 build/%.o: kernel/%.c kernel/kernel.h
 	@mkdir -p build

@@ -3,6 +3,7 @@
  * handling.
  */
 #include "kernel.h"
+#include "gfx.h"
 
 struct idt_entry {
     u16 base_lo;
@@ -123,6 +124,14 @@ void irq_install(u8 irq, void (*handler)(void))
     u8  mask = inb(port);
     mask &= (u8)~(1 << bit);
     outb(port, mask);
+
+    /* Interrupts 8-15 arrive through the slave PIC, which is wired to
+     * IRQ2 on the master. That cascade line has to be unmasked too. */
+    if (irq >= 8) {
+        u8 master = inb(0x21);
+        master &= (u8)~(1 << 2);
+        outb(0x21, master);
+    }
 }
 
 void idt_init(void)
@@ -149,9 +158,9 @@ void interrupt_dispatch(struct interrupt_frame *f)
 {
     if (f->vector < 32) {
         /* A CPU exception is always a bug in the kernel - report and stop. */
-        console_set_color(VGA_COLOR(COLOR_WHITE, COLOR_RED));
+        console_set_color(C_WHITE);
         kprintf("\n\n KERNEL PANIC ");
-        console_set_color(VGA_COLOR(COLOR_LIGHT_RED, COLOR_BLACK));
+        console_set_color(C_RED);
         kprintf("\n %s (vector %u, error 0x%x)\n eip = 0x%x\n",
                 exception_names[f->vector], f->vector, f->error, f->eip);
         kprintf("\n The system has been halted. Press the reset button.\n");

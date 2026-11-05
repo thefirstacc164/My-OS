@@ -1,33 +1,40 @@
 /*
- * MyOS - VGA text console (80x25) + serial mirror for debugging.
+ * MyOS - text console.
  *
- * Everything printed on screen is also sent out of the first serial port,
- * which is how the automated test suite reads the kernel's output.
+ * Output can go to two places:
+ *   - the whole screen (boot messages), rendered with the 8x16 font
+ *   - a text buffer owned by a window (the terminal app)
+ *
+ * Every character is mirrored to COM1, which is how the automated tests
+ * read what the kernel is doing.
  */
 #include <stdarg.h>
 #include "kernel.h"
+#include "gfx.h"
 
-#define VGA_WIDTH   80
-#define VGA_HEIGHT  25
 #define SERIAL_PORT 0x3F8
+#define FONT_W 8
+#define FONT_H 16
 
-static volatile u16 *const vga = (volatile u16 *)0xB8000;
+static int cols, rows;
 static int cx, cy;
-static u8 attr = VGA_COLOR(COLOR_LIGHT_GREY, COLOR_BLACK);
-static u8 default_attr = VGA_COLOR(COLOR_LIGHT_GREY, COLOR_BLACK);
+static u8  color = C_TEXT;
+static u8  default_color = C_TEXT;
+
+struct textbuf *console_target;
 
 /* ------------------------------------------------------------------ */
 /* Serial port (COM1)                                                 */
 /* ------------------------------------------------------------------ */
 void serial_init(void)
 {
-    outb(SERIAL_PORT + 1, 0x00);   /* disable interrupts            */
-    outb(SERIAL_PORT + 3, 0x80);   /* enable DLAB (set baud rate)   */
-    outb(SERIAL_PORT + 0, 0x01);   /* divisor 1 => 115200 baud      */
     outb(SERIAL_PORT + 1, 0x00);
-    outb(SERIAL_PORT + 3, 0x03);   /* 8 bits, no parity, one stop   */
-    outb(SERIAL_PORT + 2, 0xC7);   /* enable + clear FIFO           */
-    outb(SERIAL_PORT + 4, 0x0B);   /* IRQs off, RTS/DSR set         */
+    outb(SERIAL_PORT + 3, 0x80);
+    outb(SERIAL_PORT + 0, 0x01);
+    outb(SERIAL_PORT + 1, 0x00);
+    outb(SERIAL_PORT + 3, 0x03);
+    outb(SERIAL_PORT + 2, 0xC7);
+    outb(SERIAL_PORT + 4, 0x0B);
 }
 
 static int serial_transmit_empty(void)
@@ -46,47 +53,107 @@ void serial_putc(char c)
 }
 
 /* ------------------------------------------------------------------ */
-/* Hardware cursor                                                    */
+/* Text buffers (used by windows such as the terminal)                */
 /* ------------------------------------------------------------------ */
-static void update_cursor(void)
+void textbuf_init(struct textbuf *tb, int c, int r, char *cells, u8 *attrs)
 {
-    u16 pos = (u16)(cy * VGA_WIDTH + cx);
-    outb(0x3D4, 0x0F);
-    outb(0x3D5, (u8)(pos & 0xFF));
-    outb(0x3D4, 0x0E);
-    outb(0x3D5, (u8)((pos >> 8) & 0xFF));
+    tb->cols = c;
+    tb->rows = r;
+    tb->cells = cells;
+    tb->attrs = attrs;
+    tb->cx = 0;
+    tb->cy = 0;
+    tb->color = C_TEXT;
+    tb->dirty = 1;
+    textbuf_clear(tb);
 }
 
-void console_cursor_hide(int hide)
+void textbuf_clear(struct textbuf *tb)
 {
-    outb(0x3D4, 0x0A);
-    outb(0x3D5, hide ? 0x20 : 0x0E);
+    for (int i = 0; i < tb->cols * tb->rows; i++) {
+        tb->cells[i] = ' ';
+        tb->attrs[i] = C_TEXT;
+    }
+    tb->cx = 0;
+    tb->cy = 0;
+    tb->dirty = 1;
+}
+
+static void textbuf_scroll(struct textbuf *tb)
+{
+    for (int y = 1; y < tb->rows; y++) {
+        for (int x = 0; x < tb->cols; x++) {
+            tb->cells[(y - 1) * tb->cols + x] = tb->cells[y * tb->cols + x];
+            tb->attrs[(y - 1) * tb->cols + x] = tb->attrs[y * tb->cols + x];
+        }
+    }
+    for (int x = 0; x < tb->cols; x++) {
+        tb->cells[(tb->rows - 1) * tb->cols + x] = ' ';
+        tb->attrs[(tb->rows - 1) * tb->cols + x] = C_TEXT;
+    }
+    tb->cy = tb->rows - 1;
+}
+
+static void textbuf_putc(struct textbuf *tb, char c)
+{
+    switch (c) {
+    case '\n':
+        tb->cx = 0;
+        tb->cy++;
+        break;
+    case '\r':
+        tb->cx = 0;
+        break;
+    case '\b':
+        if (tb->cx > 0) {
+            tb->cx--;
+            tb->cells[tb->cy * tb->cols + tb->cx] = ' ';
+        }
+        break;
+    case '\t':
+        do {
+            textbuf_putc(tb, ' ');
+        } while (tb->cx % 8 != 0);
+        break;
+    default:
+        tb->cells[tb->cy * tb->cols + tb->cx] = c;
+        tb->attrs[tb->cy * tb->cols + tb->cx] = tb->color;
+        tb->cx++;
+        if (tb->cx >= tb->cols) {
+            tb->cx = 0;
+            tb->cy++;
+        }
+        break;
+    }
+    if (tb->cy >= tb->rows)
+        textbuf_scroll(tb);
+    tb->dirty = 1;
 }
 
 /* ------------------------------------------------------------------ */
-/* Screen primitives                                                  */
+/* Screen console                                                     */
 /* ------------------------------------------------------------------ */
-void console_clear(void)
+static void screen_scroll(void)
 {
-    for (int i = 0; i < VGA_WIDTH * VGA_HEIGHT; i++)
-        vga[i] = (u16)((attr << 8) | ' ');
-    cx = cy = 0;
-    update_cursor();
+    u8 *bb = gfx_buffer();
+    int w = gfx_width();
+    int h = gfx_height();
+    u32 lines = (u32)FONT_H * (u32)w;
+
+    for (int y = FONT_H; y < h; y++)
+        for (int x = 0; x < w; x++)
+            bb[(y - FONT_H) * w + x] = bb[y * w + x];
+
+    for (int y = h - FONT_H; y < h; y++)
+        for (int x = 0; x < w; x++)
+            bb[y * w + x] = C_BLACK;
+
+    (void)lines;
+    cy = rows - 1;
 }
 
-static void scroll(void)
+static void screen_putc(char c)
 {
-    for (int i = 0; i < (VGA_HEIGHT - 1) * VGA_WIDTH; i++)
-        vga[i] = vga[i + VGA_WIDTH];
-    for (int i = (VGA_HEIGHT - 1) * VGA_WIDTH; i < VGA_HEIGHT * VGA_WIDTH; i++)
-        vga[i] = (u16)((attr << 8) | ' ');
-    cy = VGA_HEIGHT - 1;
-}
-
-void console_putc(char c)
-{
-    serial_putc(c);
-
     switch (c) {
     case '\n':
         cx = 0;
@@ -98,27 +165,70 @@ void console_putc(char c)
     case '\b':
         if (cx > 0) {
             cx--;
-            vga[cy * VGA_WIDTH + cx] = (u16)((attr << 8) | ' ');
+            gfx_fill(cx * FONT_W, cy * FONT_H, FONT_W, FONT_H, C_BLACK);
         }
         break;
     case '\t':
         do {
-            console_putc(' ');
+            screen_putc(' ');
         } while (cx % 8 != 0);
         return;
-    default:
-        vga[cy * VGA_WIDTH + cx] = (u16)((attr << 8) | (u8)c);
+    default: {
+        int px = cx * FONT_W;
+        int py = cy * FONT_H;
+        gfx_char(px, py, (unsigned char)c, color);
         cx++;
-        if (cx >= VGA_WIDTH) {
+        if (cx >= cols) {
             cx = 0;
             cy++;
         }
         break;
     }
+    }
 
-    if (cy >= VGA_HEIGHT)
-        scroll();
-    update_cursor();
+    if (cy >= rows)
+        screen_scroll();
+}
+
+/* ------------------------------------------------------------------ */
+/* Public console API                                                 */
+/* ------------------------------------------------------------------ */
+void console_init(void)
+{
+    serial_init();
+    cols = gfx_width() / FONT_W;
+    rows = gfx_height() / FONT_H;
+    cx = cy = 0;
+    color = default_color;
+    console_target = NULL;
+}
+
+void console_set_target(struct textbuf *tb)
+{
+    console_target = tb;
+}
+
+void console_clear(void)
+{
+    if (console_target) {
+        textbuf_clear(console_target);
+        return;
+    }
+    gfx_clear(C_BLACK);
+    cx = cy = 0;
+}
+
+void console_putc(char c)
+{
+    serial_putc(c);
+
+    if (console_target) {
+        textbuf_putc(console_target, c);
+        return;
+    }
+    if (!gfx_available())
+        return;
+    screen_putc(c);
 }
 
 void console_write(const char *s)
@@ -127,28 +237,27 @@ void console_write(const char *s)
         console_putc(*s++);
 }
 
-void console_set_color(u8 color)
+void console_set_color(u8 c)
 {
-    attr = color;
+    color = c;
+    if (console_target)
+        console_target->color = c;
 }
 
 u8 console_get_color(void)
 {
-    return attr;
+    return color;
 }
 
-void console_set_default_color(u8 color)
+void console_set_default_color(u8 c)
 {
-    default_attr = color;
-    attr = color;
+    default_color = c;
+    color = c;
 }
 
-void console_init(void)
+void console_cursor_hide(int hide)
 {
-    serial_init();
-    attr = default_attr;
-    console_clear();
-    console_cursor_hide(0);
+    (void)hide;
 }
 
 /* ------------------------------------------------------------------ */
@@ -167,7 +276,8 @@ static int format(char *out, u32 size, const char *fmt, va_list ap)
         }
         fmt++;
 
-        int pad_zero = 0, width = 0;
+        int pad_zero = 0, width = 0, left = 0;
+        if (*fmt == '-') { left = 1; fmt++; }
         if (*fmt == '0') { pad_zero = 1; fmt++; }
         while (*fmt >= '0' && *fmt <= '9') {
             width = width * 10 + (*fmt - '0');
@@ -229,8 +339,11 @@ static int format(char *out, u32 size, const char *fmt, va_list ap)
         }
         fmt++;
 
-        for (int i = len; i < width; i++) PUT(pad_zero ? '0' : ' ');
+        if (!left)
+            for (int i = len; i < width; i++) PUT(pad_zero ? '0' : ' ');
         for (int i = 0; i < len; i++) PUT(tmp[i]);
+        if (left)
+            for (int i = len; i < width; i++) PUT(' ');
     }
     if (size) out[written < size ? written : size - 1] = '\0';
     #undef PUT
@@ -245,5 +358,25 @@ int kprintf(const char *fmt, ...)
     int n = format(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     console_write(buf);
+    return n;
+}
+
+void serial_printf(const char *fmt, ...)
+{
+    char buf[256];
+    va_list ap;
+    va_start(ap, fmt);
+    format(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    for (const char *p = buf; *p; p++)
+        serial_putc(*p);
+}
+
+int ksnprintf(char *buf, u32 size, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    int n = format(buf, size, fmt, ap);
+    va_end(ap);
     return n;
 }

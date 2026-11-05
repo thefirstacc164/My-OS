@@ -61,3 +61,26 @@ int atoi(const char *s)
     }
     return value * sign;
 }
+
+void strcpy_s(char *dst, u32 size, const char *src)
+{
+    u32 i = 0;
+    while (src[i] && i + 1 < size) {
+        dst[i] = src[i];
+        i++;
+    }
+    if (size)
+        dst[i] = '\0';
+}
+
+void strcat_s(char *dst, u32 size, const char *src)
+{
+    u32 len = strlen(dst);
+    u32 i = 0;
+    while (src[i] && len + i + 1 < size) {
+        dst[len + i] = src[i];
+        i++;
+    }
+    if (size)
+        dst[len + i] = '\0';
+}
