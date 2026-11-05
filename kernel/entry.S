@@ -8,6 +8,7 @@
 .extern kmain
 .extern __bss_start
 .extern __bss_end
+.extern __stack_top
 .extern interrupt_dispatch
 
 /* ------------------------------------------------------------------ */
@@ -15,7 +16,7 @@
 /* ------------------------------------------------------------------ */
 _start:
     cli
-    mov     esp, 0x90000            /* our stack lives just below 0x9FC00 */
+    mov     esp, offset __stack_top /* stack is reserved in the linker script */
 
     cld
     mov     edi, offset __bss_start /* zero out the .bss section */

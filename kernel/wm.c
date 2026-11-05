@@ -65,7 +65,8 @@ static int drag_offset_x, drag_offset_y;
 static int menu_open;
 static int dirty = 1;
 
-static u8 wallpaper[WALLPAPER_BYTES];
+/* the wallpaper is a full frame; it lives above the back buffer */
+static u8 *const wallpaper = (u8 *)WALLPAPER_ADDR;
 
 /* mouse cursor bitmap: 12x18 arrow, 1 = white, 2 = black outline */
 static const char cursor_shape[18][13] = {
@@ -791,8 +792,17 @@ void wm_run(void)
     mouse_set_bounds(gfx_width(), gfx_height());
     render();
 
+    u32 sync_counter = 0;
+
     for (;;) {
         int changed = 0;
+
+        /* every second or so, push changed files to the disk */
+        if (++sync_counter >= 100) {
+            sync_counter = 0;
+            if (fs_is_dirty())
+                fs_sync();
+        }
 
         while (mouse_pop(&ev)) {
             changed = 1;

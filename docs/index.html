@@ -280,6 +280,7 @@
 
     <div class="controls">
       <button id="restart-btn" disabled>⟲ Restart</button>
+      <button id="reset-btn" disabled title="Delete every file you saved on this page">✕ Reset files</button>
       <button id="fullscreen-btn" disabled>⛶ Fullscreen</button>
     </div>
 
@@ -354,6 +355,7 @@
   var statusText = document.getElementById("status-text");
   var restartBtn = document.getElementById("restart-btn");
   var fullscreenBtn = document.getElementById("fullscreen-btn");
+  var resetBtn = document.getElementById("reset-btn");
   var container = document.getElementById("screen_container");
   var emulator = null;
 
@@ -379,6 +381,41 @@
     outer.style.minHeight = "0";
   }
 
+  /* ------------------------------------------------------------------
+   * The virtual hard disk.
+   * v86 writes straight into the buffer we hand it, so we can snapshot it
+   * into localStorage while the machine runs. That is what makes files
+   * survive a page reload — the guest only ever sees a normal ATA disk.
+   * ------------------------------------------------------------------ */
+  var DISK_BYTES = 256 * 1024;
+  var DISK_KEY = "myos:disk:v1";
+  var disk = null;
+
+  function loadDisk() {
+    var bytes = new Uint8Array(DISK_BYTES);
+    try {
+      var saved = localStorage.getItem(DISK_KEY);
+      if (saved) {
+        var bin = atob(saved);
+        if (bin.length === DISK_BYTES) {
+          for (var i = 0; i < DISK_BYTES; i++) bytes[i] = bin.charCodeAt(i);
+        }
+      }
+    } catch (e) { /* private mode, or storage full: just start fresh */ }
+    return bytes;
+  }
+
+  function saveDisk() {
+    if (!disk) return;
+    try {
+      var chunks = [];
+      for (var i = 0; i < DISK_BYTES; i += 8192) {
+        chunks.push(String.fromCharCode.apply(null, disk.subarray(i, i + 8192)));
+      }
+      localStorage.setItem(DISK_KEY, btoa(chunks.join("")));
+    } catch (e) { /* ignore quota errors */ }
+  }
+
   function boot() {
     if (emulator) return;
     bootBtn.disabled = true;
@@ -398,6 +435,7 @@
         bios: { url: "bios/seabios.bin" },
         vga_bios: { url: "bios/vgabios.bin" },
         fda: { url: "myos.img" },
+        hda: { buffer: disk.buffer },
         autostart: true,
         disable_mouse: true,
       });
@@ -406,11 +444,15 @@
       return;
     }
 
+    setInterval(saveDisk, 4000);
+    window.addEventListener("pagehide", saveDisk);
+
     emulator.add_listener("emulator-ready", function () {
-      setStatus("running — MyOS booting", "on");
+      setStatus("running — MyOS booting, files are saved in this browser", "on");
       power.classList.add("hidden");
       restartBtn.disabled = false;
       fullscreenBtn.disabled = false;
+      resetBtn.disabled = false;
       container.click();
     });
 
@@ -429,6 +471,15 @@
       emulator.restart();
       setStatus("rebooting…", "on");
     }
+  });
+
+  resetBtn.addEventListener("click", function () {
+    if (!emulator) return;
+    if (!confirm("Delete every file saved in MyOS and start from the built-in ones?")) return;
+    try { localStorage.removeItem(DISK_KEY); } catch (e) {}
+    for (var i = 0; i < DISK_BYTES; i++) disk[i] = 0;
+    emulator.restart();
+    setStatus("disk wiped — rebooting", "on");
   });
 
   fullscreenBtn.addEventListener("click", function () {

@@ -17,7 +17,6 @@
 #define VBE_BITS_PER_PIXEL     0x19
 #define VBE_PHYS_BASE          0x28
 
-#define BACKBUFFER_ADDR 0x200000u
 #define MAX_WIDTH  1024
 #define MAX_HEIGHT 768
 

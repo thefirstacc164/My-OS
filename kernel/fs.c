@@ -10,6 +10,29 @@
 static struct fs_node nodes[FS_MAX_NODES];
 static int node_count;
 
+/* The saved image is a flat record list; 64 KB is plenty for a desktop
+ * this size, and it means a save is a handful of ATA sectors. */
+#define FS_IMAGE_SECTORS 128
+#define FS_IMAGE_BYTES   (FS_IMAGE_SECTORS * 512)
+#define FS_RECORD_HEADER 36      /* used, is_dir, pad, parent, size, name */
+
+/* the save buffer lives at a fixed address, not in .bss */
+static u8 *const image = (u8 *)FS_IMAGE_ADDR;
+static int dirty;
+
+static void put32(u8 *p, u32 v)
+{
+    p[0] = (u8)(v & 0xFF);
+    p[1] = (u8)((v >> 8) & 0xFF);
+    p[2] = (u8)((v >> 16) & 0xFF);
+    p[3] = (u8)((v >> 24) & 0xFF);
+}
+
+static u32 get32(const u8 *p)
+{
+    return (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24);
+}
+
 static int new_node(int parent, const char *name, int is_dir)
 {
     if (node_count >= FS_MAX_NODES)
@@ -38,6 +61,7 @@ int fs_create(int dir, const char *name, int is_dir)
         return -1;
     if (fs_find(dir, name) >= 0)
         return -1;
+    dirty = 1;
     return new_node(dir, name, is_dir);
 }
 
@@ -54,6 +78,7 @@ int fs_write(int index, const char *data)
     }
     n->data[i] = '\0';
     n->size = i;
+    dirty = 1;
     return i;
 }
 
@@ -113,6 +138,7 @@ int fs_remove(int index)
     if (index <= 0 || index >= node_count)
         return -1;
     remove_tree(index);
+    dirty = 1;
     return 0;
 }
 
@@ -170,6 +196,134 @@ int fs_resolve(const char *path)
             return -1;
     }
     return cur;
+}
+
+/* ------------------------------------------------------------------ */
+/* Saving to and loading from the ATA disk                            */
+/* ------------------------------------------------------------------ */
+void fs_mark_dirty(void) { dirty = 1; }
+int  fs_is_dirty(void)   { return dirty; }
+
+int fs_save(void)
+{
+    if (!ata_present())
+        return -1;
+
+    u32 pos = 16;
+    u32 count = 0;
+
+    for (int i = 0; i < node_count; i++) {
+        struct fs_node *n = &nodes[i];
+        u32 size = (n->used && !n->is_dir) ? (u32)n->size : 0;
+        u32 need = (FS_RECORD_HEADER + size + 3) & ~3u;
+
+        if (pos + need > FS_IMAGE_BYTES)
+            break;
+
+        u8 *r = image + pos;
+        r[0] = (u8)(n->used ? 1 : 0);
+        r[1] = (u8)(n->is_dir ? 1 : 0);
+        r[2] = 0;
+        r[3] = 0;
+        put32(r + 4, n->parent < 0 ? 0xFFFFFFFFu : (u32)n->parent);
+        put32(r + 8, size);
+        memset(r + 12, 0, FS_NAME_MAX);
+        memcpy(r + 12, n->name, strlen(n->name));
+        if (size)
+            memcpy(r + FS_RECORD_HEADER, n->data, size);
+
+        pos += need;
+        count++;
+    }
+
+    memcpy(image, "MYOSFS01", 8);
+    put32(image + 8, count);
+    put32(image + 12, pos);
+
+    if (ata_write(0, image, (pos + 511) / 512) < 0)
+        return -1;
+
+    dirty = 0;
+    return (int)count;
+}
+
+int fs_load(void)
+{
+    if (!ata_present())
+        return -1;
+    if (ata_read(0, image, FS_IMAGE_SECTORS) < 0)
+        return -1;
+    if (strncmp((const char *)image, "MYOSFS01", 8) != 0)
+        return -1;
+
+    u32 count = get32(image + 8);
+    u32 bytes = get32(image + 12);
+
+    if (count < 2 || count > FS_MAX_NODES)
+        return -1;
+    if (bytes < 16 || bytes > FS_IMAGE_BYTES)
+        return -1;
+
+    memset(nodes, 0, sizeof(nodes));
+    node_count = (int)count;
+
+    u32 pos = 16;
+    for (u32 i = 0; i < count; i++) {
+        if (pos + FS_RECORD_HEADER > bytes)
+            goto bad;
+
+        u8 *r = image + pos;
+        struct fs_node *n = &nodes[i];
+
+        n->used = r[0] ? 1 : 0;
+        n->is_dir = r[1] ? 1 : 0;
+
+        u32 parent = get32(r + 4);
+        n->parent = (parent == 0xFFFFFFFFu) ? -1 : (int)parent;
+
+        u32 size = get32(r + 8);
+        if (size > FS_FILE_MAX - 1)
+            goto bad;
+
+        memcpy(n->name, r + 12, FS_NAME_MAX);
+        n->name[FS_NAME_MAX - 1] = '\0';
+        n->size = n->is_dir ? 0 : (int)size;
+
+        pos += FS_RECORD_HEADER;
+        n->data[0] = '\0';
+        if (size) {
+            if (pos + size > bytes)
+                goto bad;
+            memcpy(n->data, image + pos, size);
+            n->data[size] = '\0';
+            pos += size;
+        }
+        pos = (pos + 3) & ~3u;
+    }
+
+    dirty = 0;
+    return (int)count;
+
+bad:
+    node_count = 0;
+    return -1;
+}
+
+/* write the file system back if anything changed */
+int fs_sync(void)
+{
+    if (!dirty || !ata_present())
+        return 0;
+    return fs_save();
+}
+
+/* wipe the disk and start from the built-in files again */
+void fs_format(void)
+{
+    fs_init();
+    if (ata_present())
+        fs_save();
+    dirty = 0;
 }
 
 /* ------------------------------------------------------------------ */

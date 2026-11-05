@@ -111,8 +111,23 @@ void kmain(void)
     mouse_init();
     ok_line("PS/2 mouse driver");
 
+    if (ata_init()) {
+        ksnprintf(line, sizeof(line), "ATA disk, %u KB",
+                  (u32)((ata_sectors() * 512) / 1024));
+        ok_line(line);
+    } else {
+        ok_line("no ATA disk, files stay in RAM");
+    }
+
     fs_init();
-    ok_line("in-memory file system");
+    if (ata_present() && fs_load() > 0) {
+        ok_line("file system restored from disk");
+    } else if (ata_present()) {
+        ok_line("new file system written to disk");
+        fs_save();
+    } else {
+        ok_line("in-memory file system");
+    }
 
     interrupts_enable();
     ok_line("interrupts enabled");

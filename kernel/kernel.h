@@ -12,6 +12,25 @@ typedef signed   int       i32;
 
 #define NULL ((void *)0)
 
+/* ---- physical memory map (decided at boot, used by the kernel) ------
+ *
+ *   0x0004800  VESA mode information block       (written by the boot sector)
+ *   0x0005000  BIOS memory map (E820)             (written by the boot sector)
+ *   0x0007C00  the boot sector itself
+ *   0x0010000  kernel: text, rodata, data, bss and stack (never above 0xA0000)
+ *   0x00A0000  VGA memory window - the kernel must never grow into this
+ *   0x0200000  graphics back buffer   (640 * 480 bytes)
+ *   0x0300000  file system save image (64 KB)
+ *   0x0400000  wallpaper image        (640 * 480 bytes)
+ *
+ * The big pixel buffers live at fixed addresses instead of in .bss, so a
+ * growing kernel cannot silently spill into VGA memory (it did once: the
+ * stack landed on the video aperture and the machine died on boot).
+ */
+#define BACKBUFFER_ADDR   0x200000
+#define FS_IMAGE_ADDR     0x300000
+#define WALLPAPER_ADDR    0x400000
+
 /* ---- port I/O ---------------------------------------------------- */
 static inline void outb(u16 port, u8 value)
 {
@@ -150,6 +169,13 @@ u16 e820_entry_count(void);
 struct e820_entry *e820_entries(void);
 u64 memory_total_bytes(void);
 
+/* ---- ata.c ------------------------------------------------------- */
+int  ata_init(void);
+int  ata_present(void);
+u32  ata_sectors(void);
+int  ata_read(u32 lba, void *buffer, u32 sectors);
+int  ata_write(u32 lba, const void *buffer, u32 sectors);
+
 /* ---- fs.c -------------------------------------------------------- */
 #define FS_MAX_NODES 48
 #define FS_NAME_MAX  24
@@ -176,6 +202,12 @@ int  fs_remove(int index);
 int  fs_write(int index, const char *data);
 int  fs_path(int index, char *out, u32 size);
 int  fs_resolve(const char *path);
+void fs_mark_dirty(void);
+int  fs_is_dirty(void);
+int  fs_save(void);
+int  fs_load(void);
+int  fs_sync(void);
+void fs_format(void);
 
 /* ---- apps / window manager --------------------------------------- */
 struct window;

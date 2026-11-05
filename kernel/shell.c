@@ -226,8 +226,11 @@ static void cmd_write(char *args)
             name[k++] = path[t];
         name[k] = '\0';
 
+        /* keep only the directory part of the path */
         if (last_slash <= 0)
-            strcpy_s(dirpath, sizeof(dirpath), "/home");
+            strcpy_s(dirpath, sizeof(dirpath), "/");
+        else
+            dirpath[last_slash] = '\0';
 
         int dir = fs_resolve(dirpath);
         if (dir < 0) {
@@ -297,6 +300,42 @@ static void cmd_halt(char *args)
         cpu_halt();
 }
 
+static void cmd_disk(char *args)
+{
+    (void)args;
+    if (!ata_present()) {
+        console_set_color(C_WARN);
+        kprintf("No ATA disk attached. Files live in RAM only.\n");
+        console_set_color(C_TEXT);
+        return;
+    }
+    kprintf("ATA disk    %u KB (%u sectors)\n",
+            (u32)((ata_sectors() * 512) / 1024), ata_sectors());
+    kprintf("saved image %u bytes per save\n", (u32)65536);
+    int count = fs_sync();
+    if (count >= 0)
+        kprintf("synced      %d file system nodes written\n", count);
+    else
+        kprintf("sync        failed\n");
+}
+
+static void cmd_format(char *args)
+{
+    (void)args;
+    if (!ata_present()) {
+        console_set_color(C_WARN);
+        kprintf("No disk to format.\n");
+        console_set_color(C_TEXT);
+        return;
+    }
+    console_set_color(C_WARN);
+    kprintf("Wiping the disk and restoring the built-in files...\n");
+    fs_format();
+    console_set_color(C_ACCENT);
+    kprintf("done.\n");
+    console_set_color(C_TEXT);
+}
+
 static void cmd_logo(char *args)
 {
     (void)args;
@@ -326,6 +365,9 @@ static const struct command commands[] = {
     { "rm",     cmd_rm     },
     { "open",   cmd_open   },
     { "logo",   cmd_logo   },
+    { "disk",   cmd_disk   },
+    { "sync",   cmd_disk   },
+    { "format", cmd_format },
     { "reboot", cmd_reboot },
     { "halt",   cmd_halt   },
 };
