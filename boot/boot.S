@@ -127,6 +127,22 @@ load_done:
     out     0x92, al
 
 /* ---------------------------------------------------------------- */
+/* VESA graphics: 640x480, 8 bits per pixel, linear framebuffer.      */
+/* The BIOS fills in the VBE mode information block at 0x4800, which  */
+/* the kernel reads to find the framebuffer address and pitch.        */
+/* 0x101 = 640x480x8. Setting bit 14 in BX asks for a linear buffer.  */
+/* ---------------------------------------------------------------- */
+    xor     ax, ax
+    mov     es, ax
+    mov     di, 0x4800
+    mov     cx, 0x0101
+    mov     ax, 0x4F01             /* get mode information           */
+    int     0x10
+    mov     ax, 0x4F02             /* set the mode                   */
+    mov     bx, 0x4101
+    int     0x10
+
+/* ---------------------------------------------------------------- */
 /* Enter protected mode                                              */
 /* ---------------------------------------------------------------- */
     cli

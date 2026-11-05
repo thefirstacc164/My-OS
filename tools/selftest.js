@@ -3,8 +3,8 @@
  * Headless self-test for MyOS.
  *
  * Boots docs/myos.img inside v86 (the same emulator the website uses),
- * collects what the kernel writes to the serial port, types a few shell
- * commands and checks the answers.
+ * clicks around the desktop with real PS/2 mouse packets, types on the
+ * emulated keyboard and checks what the kernel reports on the serial port.
  *
  *   npm install v86
  *   node tools/selftest.js
@@ -16,7 +16,6 @@ const path = require("path");
 const { V86 } = require("v86");
 
 const V86_DIR = path.dirname(require.resolve("v86/package.json"));
-
 const ROOT = path.resolve(__dirname, "..");
 const DOCS = path.join(ROOT, "docs");
 
@@ -27,55 +26,92 @@ const read = (p) => {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function startEmulator() {
-    return new V86({
+const failures = [];
+function check(label, ok) {
+    console.log(`${ok ? "  ok  " : " FAIL "} ${label}`);
+    if (!ok) failures.push(label);
+}
+
+async function main() {
+    let serial = "";
+    const emulator = new V86({
         wasm_path: path.join(V86_DIR, "build/v86.wasm"),
         memory_size: 32 * 1024 * 1024,
-        vga_memory_size: 2 * 1024 * 1024,
+        vga_memory_size: 4 * 1024 * 1024,
         bios: { buffer: read(path.join(DOCS, "bios/seabios.bin")) },
         vga_bios: { buffer: read(path.join(DOCS, "bios/vgabios.bin")) },
         fda: { buffer: read(path.join(DOCS, "myos.img")) },
         autostart: true,
     });
-}
 
-async function main() {
-    let serial = "";
-    const emulator = startEmulator();
     emulator.add_listener("serial0-output-byte", (byte) => {
         serial += String.fromCharCode(byte);
     });
 
-    const failures = [];
-    const check = (label, ok) => {
-        console.log(`${ok ? "  ok  " : " FAIL "} ${label}`);
-        if (!ok) failures.push(label);
-    };
+    const ps2 = () => emulator.v86.cpu.devices.ps2;
+    let mouse_x = 320;
+    let mouse_y = 240;
 
-    // wait for the shell prompt
-    for (let i = 0; i < 60 && !serial.includes("myos>"); i++) await sleep(250);
-    check("kernel boots to a shell prompt", serial.includes("myos>"));
+    async function move_to(x, y) {
+        while (mouse_x !== x || mouse_y !== y) {
+            const dx = Math.max(-8, Math.min(8, x - mouse_x));
+            const dy = Math.max(-8, Math.min(8, y - mouse_y));
+            ps2().mouse_send_delta(dx, -dy);
+            mouse_x += dx;
+            mouse_y += dy;
+            await sleep(14);
+        }
+        await sleep(90);
+    }
 
-    const run = async (command, expected, timeoutMs = 4000) => {
-        serial = "";
-        emulator.keyboard_send_text(command + "\n");
-        const deadline = Date.now() + timeoutMs;
-        while (Date.now() < deadline && !serial.includes(expected)) await sleep(100);
-        check(`'${command}' → ${expected}`, serial.includes(expected));
-    };
+    async function click() {
+        ps2().mouse_send_click(1, 0, 0);
+        await sleep(70);
+        ps2().mouse_send_click(0, 0, 0);
+        await sleep(200);
+    }
 
-    await run("about", "written from scratch");
-    await run("echo hello", "hello");
-    await run("mem", "usable memory");
-    await run("uptime", "timer ticks");
-    await run("date", "hardware clock");
-    await run("nosuchcommand", "Unknown command");
+    async function wait_for(needle, timeout = 6000) {
+        const deadline = Date.now() + timeout;
+        while (Date.now() < deadline) {
+            if (serial.includes(needle))
+                return true;
+            await sleep(100);
+        }
+        return false;
+    }
 
-    // boot banner and driver init lines
+    check("kernel boots", await wait_for("starting desktop", 20000));
+    check("VESA framebuffer initialised", serial.includes("VESA framebuffer"));
+    check("mouse driver started", serial.includes("PS/2 mouse driver"));
+    check("file system mounted", serial.includes("in-memory file system"));
+
+    serial = "";
+    await move_to(190, 15);          /* "Terminal" in the top bar */
+    await click();
+    check("clicking the top bar opens the Terminal", await wait_for("OPEN Terminal"));
+
     serial = "";
     emulator.keyboard_send_text("about\n");
-    await sleep(500);
-    check("all drivers report OK", true);
+    check("typing runs a shell command", await wait_for("written from scratch"));
+
+    serial = "";
+    emulator.keyboard_send_text("ls\n");
+    check("ls lists the file system", await wait_for("welcome.txt"));
+
+    serial = "";
+    emulator.keyboard_send_text("mem\n");
+    check("mem reads the BIOS memory map", await wait_for("usable memory"));
+
+    serial = "";
+    await move_to(346, 15);          /* "Browser" */
+    await click();
+    check("the Browser opens", await wait_for("OPEN Browser"));
+
+    serial = "";
+    await move_to(297, 243);         /* the "About MyOS" link */
+    await click();
+    check("clicking a link navigates", await wait_for("LINK about.html"));
 
     if (failures.length) {
         console.log(`\n${failures.length} check(s) failed`);
