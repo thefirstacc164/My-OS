@@ -55,7 +55,7 @@ static void cmd_about(char *args)
     kprintf("MyOS is a small operating system written from scratch:\n");
     kprintf("its own boot sector, its own 32-bit kernel, its own drivers,\n");
     kprintf("its own window manager. No Linux underneath.\n\n");
-    kprintf("  version   0.2 \"Desktop\"\n");
+    kprintf("  version   0.3 \"Full desktop\"\n");
     kprintf("  arch      i386 (32-bit x86, protected mode)\n");
     kprintf("  display   640x480, 8-bit colour, VESA framebuffer\n");
     kprintf("  input     PS/2 keyboard and mouse\n");
